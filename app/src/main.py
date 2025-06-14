@@ -12,11 +12,12 @@ from langchain_core.prompts import (
     SystemMessagePromptTemplate
 )
 
-from src.chat_memory import get_chat_history, get_redis_chat_history
+from src.chat_memory import get_chat_history, get_redis_chat_history, get_redis_chat_ids
 from src.chat_model import DockerModelRunnerChatModel
 
 
 logger = logging.getLogger("APP.main")
+logger.setLevel(logging.DEBUG)
 app = FastAPI()
 # metrics_app = make_asgi_app()
 # app.mount("/metrics", metrics_app)
@@ -79,7 +80,7 @@ class ChatRequest(BaseModel):
 
 @app.post("/chat/{chat_id}")
 def chat_with_id(chat_id: str, request: ChatRequest):
-    print(request)
+    logger.debug(request)
     response = chain.invoke(
         {"prompt": request.prompt},
         config={"configurable": {"session_id": chat_id}}
@@ -109,6 +110,15 @@ def clear_chat_history(chat_id: str):
     chat_history = get_redis_chat_history(chat_id)
     chat_history.clear()
     return {"message": "Chat history cleared"}
+
+
+@app.get("/chats")
+def list_chat_histories():
+    ids = get_redis_chat_ids()
+    logger.debug(ids)
+    if not ids:
+        return {"message": "No chat histories found"}
+    return {"chat_ids": ids}
 
 
 def save_metrics(timings):

@@ -3,9 +3,11 @@ from pydantic import BaseModel, Field
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_redis import RedisChatMessageHistory
 from langchain_core.messages import BaseMessage
+from redis import Redis
+
 
 REDIS_URL = environ.get("REDIS_URL", "redis://redis:6379")
-
+redis_client = Redis.from_url(REDIS_URL)
 class BufferWindowMessageHistory(BaseChatMessageHistory, BaseModel):
     messages: list[BaseMessage] = Field(default_factory=list)
     k: int = Field(default_factory=int)
@@ -37,3 +39,8 @@ def get_redis_chat_history(session_id: str) -> RedisChatMessageHistory:
         session_id=session_id,
         redis_url=REDIS_URL,
     )
+    
+
+def get_redis_chat_ids() -> list[str]:
+    ids = redis_client.keys(pattern="chat:*:*")
+    return list(set(id.split(b":")[1] for id in ids))

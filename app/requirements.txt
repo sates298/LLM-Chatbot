@@ -4,3 +4,4 @@ requests
 langchain
 langchain-openai
 prometheus-client
+langchain-redis

@@ -1,6 +1,7 @@
 from os import environ
 import logging
-from fastapi import FastAPI, Response
+import uuid
+from fastapi import FastAPI, Response, status
 from pydantic import BaseModel
 from prometheus_client import make_asgi_app, CONTENT_TYPE_LATEST, Counter, generate_latest
 from langchain_core.runnables import ConfigurableFieldSpec, RunnableWithMessageHistory
@@ -11,7 +12,7 @@ from langchain_core.prompts import (
     SystemMessagePromptTemplate
 )
 
-from src.chat_memory import get_chat_history
+from src.chat_memory import get_chat_history, get_redis_chat_history
 from src.chat_model import DockerModelRunnerChatModel
 
 
@@ -46,7 +47,7 @@ prompt = ChatPromptTemplate(
 
 chain = prompt | llm
 
-chain = RunnableWithMessageHistory(
+chain_short_buffer = RunnableWithMessageHistory(
     chain,
     get_session_history=lambda session_id, k: get_chat_history(chat_map, session_id, k),
     input_messages_key="prompt",
@@ -69,19 +70,47 @@ chain = RunnableWithMessageHistory(
     ]
 )
 
+chain = RunnableWithMessageHistory(
+    chain, get_redis_chat_history, input_messages_key="prompt", history_messages_key="chat_history"
+)
 class ChatRequest(BaseModel):
     prompt: str
 
-@app.post("/chat")
-def chat(request: ChatRequest):
+
+@app.post("/chat/{chat_id}")
+def chat_with_id(chat_id: str, request: ChatRequest):
+    print(request)
     response = chain.invoke(
         {"prompt": request.prompt},
-        config={"configurable": {"session_id": "id_default", "k": 8}}
+        config={"configurable": {"session_id": chat_id}}
     )
-    # print(response)
+    save_metrics(response.response_metadata["timings"])
+    return {"response": response, "session_id": chat_id}
+
+
+@app.post("/chat")
+def chat(request: ChatRequest):
+    chat_id = str(uuid.uuid4())
+    return chat_with_id(chat_id, request)
+
+
+@app.post("/chat/short/{k}")
+def chat(request: ChatRequest, k: int = 8):
+    response = chain_short_buffer.invoke(
+        {"prompt": request.prompt},
+        config={"configurable": {"session_id": "id_default", "k": k}}
+    )
     save_metrics(response.response_metadata["timings"])
     return response
-  
+
+
+@app.get("/clear/{chat_id}")
+def clear_chat_history(chat_id: str):
+    chat_history = get_redis_chat_history(chat_id)
+    chat_history.clear()
+    return {"message": "Chat history cleared"}
+
+
 def save_metrics(timings):
     global metrics
     if timings:
